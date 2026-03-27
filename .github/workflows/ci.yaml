@@ -48,6 +48,8 @@ jobs:
       id-token: write
     steps:
       - uses: black-desk/workflows/rust@master
+        with:
+          submodules: true
 
   # TODO: Uncomment this job if this is a project with a container
   # container:
