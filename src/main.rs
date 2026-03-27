@@ -115,7 +115,16 @@ fn main() {
     let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
 
     // Parse commits
-    let mut commits = parse_commits(&lines);
+    let mut commits = match parse_commits(&lines) {
+        Ok(c) => c,
+        Err(line_num) => {
+            eprintln!(
+                "error: line {} has leading whitespace, which is not allowed",
+                line_num
+            );
+            std::process::exit(1);
+        }
+    };
 
     if commits.is_empty() {
         return;
