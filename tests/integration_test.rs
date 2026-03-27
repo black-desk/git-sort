@@ -160,11 +160,11 @@ fn test_branch_sort() {
 
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 3);
-    // On master (HEAD): only B is in the range (A is merge-base, C is not on master)
-    // So B comes first, then A and C in their original order (C, A)
+    // On master (HEAD): B is in topo order, A is merge-base (appended to end)
+    // C is not on master, goes to very end
     assert!(lines[0].starts_with(&b));
-    assert!(lines[1].starts_with(&c)); // C came first in input
-    assert!(lines[2].starts_with(&a));
+    assert!(lines[1].starts_with(&a)); // A is merge-base, appended to topo_order
+    assert!(lines[2].starts_with(&c)); // C not on master, goes to end
 }
 
 #[test]

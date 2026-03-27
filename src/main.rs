@@ -130,10 +130,19 @@ fn main() {
     let exclude_base = merge_base.as_ref().map(|b| format!("^{}", b));
 
     // Get topological order
-    let topo_order = get_topo_order(
+    let mut topo_order = get_topo_order(
         &args.reference,
         exclude_base.as_deref(),
     );
+
+    // If merge-base is in the input commits, append it to the end
+    // (it's the oldest among all input commits)
+    if let Some(ref base) = merge_base {
+        if commits.iter().any(|(h, _)| h == base) {
+            topo_order.push(base.clone());
+        }
+    }
+
     let topo_refs: Vec<&str> = topo_order.iter().map(|s| s.as_str()).collect();
 
     // Sort commits
