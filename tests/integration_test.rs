@@ -245,3 +245,96 @@ fn test_output_to_file() {
     assert!(lines[0].starts_with(&b)); // B is newer
     assert!(lines[1].starts_with(&a));
 }
+
+#[test]
+fn test_input_without_title() {
+    let repo = create_test_repo();
+    let path = repo.path();
+
+    let a = create_commit(path, "A");
+    let b = create_commit(path, "B");
+
+    // Input without title (just hashes)
+    let input = format!("{}\n{}\n", b, a);
+
+    let (success, stdout) = run_git_sort(path, &[], &input);
+    assert!(success);
+
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with(&b));
+    assert!(lines[1].starts_with(&a));
+}
+
+#[test]
+fn test_input_with_whitespace_lines() {
+    let repo = create_test_repo();
+    let path = repo.path();
+
+    let a = create_commit(path, "A");
+    let b = create_commit(path, "B");
+
+    // Input with blank lines (should be skipped)
+    let input = format!("{}\tB\n\n{}\tA\n   \n", b, a);
+
+    let (success, stdout) = run_git_sort(path, &[], &input);
+    assert!(success);
+
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with(&b));
+    assert!(lines[1].starts_with(&a));
+}
+
+#[test]
+fn test_input_with_leading_whitespace_error() {
+    let repo = create_test_repo();
+    let path = repo.path();
+
+    let a = create_commit(path, "A");
+
+    // Input with leading whitespace (should error)
+    let input = format!("{}\tA\n  {}\n", a, a);
+
+    let binary = get_binary_path();
+    let mut child = Command::new(&binary)
+        .current_dir(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn git-sort");
+
+    {
+        let mut stdin = child.stdin.take().expect("Failed to get stdin");
+        stdin.write_all(input.as_bytes()).expect("Failed to write");
+    }
+
+    let result = child.wait_with_output().expect("Failed to get output");
+    assert!(!result.status.success());
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("leading whitespace"));
+    assert!(stderr.contains("line 2"));
+}
+
+#[test]
+fn test_output_preserves_title() {
+    let repo = create_test_repo();
+    let path = repo.path();
+
+    let a = create_commit(path, "A");
+    let b = create_commit(path, "B");
+
+    // Input with titles
+    let input = format!("{}\tFirst commit\n{}\tSecond commit\n", a, b);
+
+    let (success, stdout) = run_git_sort(path, &[], &input);
+    assert!(success);
+
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2);
+    // Verify titles are preserved
+    assert!(lines[0].contains("Second commit"));
+    assert!(lines[1].contains("First commit"));
+}
