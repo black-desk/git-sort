@@ -51,9 +51,31 @@ fn main() {
         return;
     }
 
+    // Find the common ancestor of all input commits to limit traversal range
+    let merge_base_output = Command::new("git")
+        .args(
+            std::iter::once("merge-base")
+                .chain(std::iter::once("--octopus"))
+                .chain(commits.iter().map(|(hash, _)| hash.as_str())),
+        )
+        .output()
+        .expect("Failed to execute git merge-base");
+
+    let merge_base = String::from_utf8_lossy(&merge_base_output.stdout)
+        .trim()
+        .to_string();
+
     // Get topological order from git rev-list
+    // Use ^<merge_base> to limit traversal to only the relevant range
+    let exclude_base = if !merge_base.is_empty() {
+        Some(format!("^{}", merge_base))
+    } else {
+        None
+    };
+
     let output = Command::new("git")
         .args(["rev-list", "--topo-order", &args.reference])
+        .args(exclude_base.as_ref())
         .output()
         .expect("Failed to execute git rev-list");
 
