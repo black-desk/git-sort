@@ -145,6 +145,24 @@ fn main() {
 
     let topo_refs: Vec<&str> = topo_order.iter().map(|s| s.as_str()).collect();
 
+    // Check if all commits are in the reference branch
+    let missing: Vec<&str> = commits
+        .iter()
+        .filter(|(hash, _)| !topo_refs.contains(&hash.as_str()))
+        .map(|(hash, _)| hash.as_str())
+        .collect();
+
+    if !missing.is_empty() {
+        eprintln!(
+            "error: the following commits are not reachable from '{}':",
+            args.reference
+        );
+        for hash in &missing {
+            eprintln!("  {}", hash);
+        }
+        std::process::exit(1);
+    }
+
     // Sort commits
     sort_by_topo_order(&mut commits, &topo_refs);
 

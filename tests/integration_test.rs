@@ -129,7 +129,7 @@ fn test_single_commit() {
 }
 
 #[test]
-fn test_branch_sort() {
+fn test_commit_not_on_reference_branch() {
     let repo = create_test_repo();
     let path = repo.path();
 
@@ -152,19 +152,31 @@ fn test_branch_sort() {
         .output()
         .expect("Failed to checkout");
 
-    // Input commits: A, B, C (all from both branches)
+    // Input includes C which is not on master
     let input = format!("{}\tC\n{}\tA\n{}\tB\n", c, a, b);
 
-    let (success, stdout) = run_git_sort(path, &[], &input);
-    assert!(success);
+    let binary = get_binary_path();
+    let mut child = Command::new(&binary)
+        .current_dir(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn git-sort");
 
-    let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 3);
-    // On master (HEAD): B is in topo order, A is merge-base (appended to end)
-    // C is not on master, goes to very end
-    assert!(lines[0].starts_with(&b));
-    assert!(lines[1].starts_with(&a)); // A is merge-base, appended to topo_order
-    assert!(lines[2].starts_with(&c)); // C not on master, goes to end
+    {
+        let mut stdin = child.stdin.take().expect("Failed to get stdin");
+        stdin.write_all(input.as_bytes()).expect("Failed to write");
+    }
+
+    let result = child.wait_with_output().expect("Failed to get output");
+
+    // Should fail with error
+    assert!(!result.status.success());
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("not reachable"));
+    assert!(stderr.contains(&c));
 }
 
 #[test]
