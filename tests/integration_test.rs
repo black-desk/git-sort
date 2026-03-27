@@ -1,47 +1,20 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// Helper to create a test git repository with commits
-fn create_test_repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().expect("Failed to create temp dir");
-    let path = dir.path();
-
-    Command::new("git")
-        .args(["init"])
-        .current_dir(path)
-        .output()
-        .expect("Failed to init git repo");
-
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(path)
-        .output()
-        .expect("Failed to config email");
-
-    Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(path)
-        .output()
-        .expect("Failed to config name");
-
-    dir
+/// Test repository path (git submodule)
+fn get_test_repo_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/test-repo")
 }
 
-/// Create a commit and return its hash
-fn create_commit(repo: &std::path::Path, msg: &str) -> String {
-    Command::new("git")
-        .args(["commit", "--allow-empty", "-m", msg])
-        .current_dir(repo)
-        .output()
-        .expect("Failed to create commit");
-
-    let hash_output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(repo)
-        .output()
-        .expect("Failed to get commit hash");
-
-    String::from_utf8_lossy(&hash_output.stdout).trim().to_string()
+/// Commit hashes from test-repo:
+/// A (Initial) -> B -> C (master)
+///              \-> D -> E (feature)
+mod commits {
+    pub const A: &str = "9c46f2328d3804beabdd165dc0b6cab0185b00d6";
+    pub const B: &str = "178293e6c71fc12ed55e7ae8e4f24e086ee524e9";
+    pub const C: &str = "2e5d0971eaf78226a2c1b416f9f63a66bbab17ad";
+    pub const D: &str = "e17208ca639046c4e254a513ba64b19b013f426c";
+    pub const E: &str = "97dadd722f8764abd01c6a9103f51787c0d753fb";
 }
 
 fn get_binary_path() -> std::path::PathBuf {
@@ -56,12 +29,13 @@ fn get_binary_path() -> std::path::PathBuf {
         })
 }
 
-fn run_git_sort(repo: &std::path::Path, args: &[&str], input: &str) -> (bool, String) {
+fn run_git_sort(args: &[&str], input: &str) -> (bool, String) {
     let binary = get_binary_path();
+    let repo = get_test_repo_path();
 
     let mut child = Command::new(&binary)
         .args(args)
-        .current_dir(repo)
+        .current_dir(&repo)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -80,84 +54,48 @@ fn run_git_sort(repo: &std::path::Path, args: &[&str], input: &str) -> (bool, St
 
 #[test]
 fn test_basic_sort() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    // Create commits: A -> B -> C
-    let a = create_commit(path, "A");
-    let b = create_commit(path, "B");
-    let c = create_commit(path, "C");
-
     // Create input with commits in wrong order
-    let input = format!("{}\tC\n{}\tA\n{}\tB\n", c, a, b);
+    let input = format!("{}\tC\n{}\tA\n{}\tB\n", commits::C, commits::A, commits::B);
 
-    let (success, stdout) = run_git_sort(path, &[], &input);
+    let (success, stdout) = run_git_sort(&[], &input);
     assert!(success);
 
     // Should be sorted in topo order (newest first): C, B, A
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 3);
-    assert!(lines[0].starts_with(&c));
-    assert!(lines[1].starts_with(&b));
-    assert!(lines[2].starts_with(&a));
+    assert!(lines[0].starts_with(commits::C));
+    assert!(lines[1].starts_with(commits::B));
+    assert!(lines[2].starts_with(commits::A));
 }
 
 #[test]
 fn test_empty_input() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    let (success, stdout) = run_git_sort(path, &[], "\n\n");
+    let (success, stdout) = run_git_sort(&[], "\n\n");
     assert!(success);
     assert!(stdout.trim().is_empty());
 }
 
 #[test]
 fn test_single_commit() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    let a = create_commit(path, "A");
-
-    let input = format!("{}\tA\n", a);
-    let (success, stdout) = run_git_sort(path, &[], &input);
+    let input = format!("{}\tA\n", commits::A);
+    let (success, stdout) = run_git_sort(&[], &input);
     assert!(success);
 
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 1);
-    assert!(lines[0].starts_with(&a));
+    assert!(lines[0].starts_with(commits::A));
 }
 
 #[test]
 fn test_commit_not_on_reference_branch() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    // Create: A -> B (master)
-    //              \-> C (feature)
-    let a = create_commit(path, "A");
-    let b = create_commit(path, "B");
-
-    Command::new("git")
-        .args(["checkout", "-b", "feature"])
-        .current_dir(path)
-        .output()
-        .expect("Failed to create branch");
-
-    let c = create_commit(path, "C");
-
-    Command::new("git")
-        .args(["checkout", "master"])
-        .current_dir(path)
-        .output()
-        .expect("Failed to checkout");
-
-    // Input includes C which is not on master
-    let input = format!("{}\tC\n{}\tA\n{}\tB\n", c, a, b);
+    // D is on feature branch, not on master
+    let input = format!("{}\tD\n{}\tA\n{}\tB\n", commits::D, commits::A, commits::B);
 
     let binary = get_binary_path();
+    let repo = get_test_repo_path();
+
     let mut child = Command::new(&binary)
-        .current_dir(path)
+        .current_dir(&repo)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -176,57 +114,36 @@ fn test_commit_not_on_reference_branch() {
 
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("not reachable"));
-    assert!(stderr.contains(&c));
+    assert!(stderr.contains(commits::D));
 }
 
 #[test]
 fn test_with_reference_option() {
-    let repo = create_test_repo();
-    let path = repo.path();
+    // On feature branch: E is newest, then D, then B
+    let input = format!("{}\tB\n{}\tE\n{}\tD\n", commits::B, commits::E, commits::D);
 
-    // Create: A -> B (master)
-    //              \-> C -> D (feature)
-    let _a = create_commit(path, "A");
-    let b = create_commit(path, "B");
-
-    Command::new("git")
-        .args(["checkout", "-b", "feature"])
-        .current_dir(path)
-        .output()
-        .expect("Failed to create branch");
-
-    let c = create_commit(path, "C");
-    let d = create_commit(path, "D");
-
-    // Input with --reference feature should sort by feature branch
-    let input = format!("{}\tB\n{}\tD\n{}\tC\n", b, d, c);
-
-    let (success, stdout) = run_git_sort(path, &["--reference", "feature"], &input);
+    let (success, stdout) = run_git_sort(&["--reference", "feature"], &input);
     assert!(success);
 
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 3);
-    // On feature branch: D is newest, then C, then B
-    assert!(lines[0].starts_with(&d));
-    assert!(lines[1].starts_with(&c));
-    assert!(lines[2].starts_with(&b));
+    assert!(lines[0].starts_with(commits::E));
+    assert!(lines[1].starts_with(commits::D));
+    assert!(lines[2].starts_with(commits::B));
 }
 
 #[test]
 fn test_output_to_file() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    let a = create_commit(path, "A");
-    let b = create_commit(path, "B");
-
-    let input = format!("{}\tA\n{}\tB\n", a, b);
-    let output_file = path.join("output.txt");
+    let input = format!("{}\tA\n{}\tB\n", commits::A, commits::B);
+    let output_file = tempfile::NamedTempFile::new().expect("Failed to create temp file");
+    let output_path = output_file.path().to_str().unwrap();
 
     let binary = get_binary_path();
+    let repo = get_test_repo_path();
+
     let mut child = Command::new(&binary)
-        .args(["-o", output_file.to_str().unwrap()])
-        .current_dir(path)
+        .args(["-o", output_path])
+        .current_dir(&repo)
         .stdin(Stdio::piped())
         .spawn()
         .expect("Failed to spawn git-sort");
@@ -239,66 +156,51 @@ fn test_output_to_file() {
     let result = child.wait().expect("Failed to wait");
     assert!(result.success());
 
-    let output_content = std::fs::read_to_string(&output_file).expect("Failed to read output");
+    let output_content = std::fs::read_to_string(output_path).expect("Failed to read output");
     let lines: Vec<&str> = output_content.lines().collect();
     assert_eq!(lines.len(), 2);
-    assert!(lines[0].starts_with(&b)); // B is newer
-    assert!(lines[1].starts_with(&a));
+    assert!(lines[0].starts_with(commits::B)); // B is newer
+    assert!(lines[1].starts_with(commits::A));
 }
 
 #[test]
 fn test_input_without_title() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    let a = create_commit(path, "A");
-    let b = create_commit(path, "B");
-
     // Input without title (just hashes)
-    let input = format!("{}\n{}\n", b, a);
+    let input = format!("{}\n{}\n", commits::B, commits::A);
 
-    let (success, stdout) = run_git_sort(path, &[], &input);
+    let (success, stdout) = run_git_sort(&[], &input);
     assert!(success);
 
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 2);
-    assert!(lines[0].starts_with(&b));
-    assert!(lines[1].starts_with(&a));
+    assert!(lines[0].starts_with(commits::B));
+    assert!(lines[1].starts_with(commits::A));
 }
 
 #[test]
 fn test_input_with_whitespace_lines() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    let a = create_commit(path, "A");
-    let b = create_commit(path, "B");
-
     // Input with blank lines (should be skipped)
-    let input = format!("{}\tB\n\n{}\tA\n   \n", b, a);
+    let input = format!("{}\tB\n\n{}\tA\n   \n", commits::B, commits::A);
 
-    let (success, stdout) = run_git_sort(path, &[], &input);
+    let (success, stdout) = run_git_sort(&[], &input);
     assert!(success);
 
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 2);
-    assert!(lines[0].starts_with(&b));
-    assert!(lines[1].starts_with(&a));
+    assert!(lines[0].starts_with(commits::B));
+    assert!(lines[1].starts_with(commits::A));
 }
 
 #[test]
 fn test_input_with_leading_whitespace_error() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    let a = create_commit(path, "A");
-
     // Input with leading whitespace (should error)
-    let input = format!("{}\tA\n  {}\n", a, a);
+    let input = format!("{}\tA\n  {}\n", commits::A, commits::A);
 
     let binary = get_binary_path();
+    let repo = get_test_repo_path();
+
     let mut child = Command::new(&binary)
-        .current_dir(path)
+        .current_dir(&repo)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -320,16 +222,13 @@ fn test_input_with_leading_whitespace_error() {
 
 #[test]
 fn test_output_preserves_title() {
-    let repo = create_test_repo();
-    let path = repo.path();
-
-    let a = create_commit(path, "A");
-    let b = create_commit(path, "B");
-
     // Input with titles
-    let input = format!("{}\tFirst commit\n{}\tSecond commit\n", a, b);
+    let input = format!(
+        "{}\tFirst commit\n{}\tSecond commit\n",
+        commits::A, commits::B
+    );
 
-    let (success, stdout) = run_git_sort(path, &[], &input);
+    let (success, stdout) = run_git_sort(&[], &input);
     assert!(success);
 
     let lines: Vec<&str> = stdout.lines().collect();

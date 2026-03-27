@@ -8,3 +8,6 @@
 [submodule ".prompts"]
 	path = .prompts
 	url = https://github.com/black-desk/.prompts
+[submodule "tests/test-repo"]
+	path = tests/test-repo
+	url = https://github.com/black-desk/git-sort-test-repo
