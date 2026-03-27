@@ -1,6 +1,7 @@
 use clap::Parser;
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::Command;
 
 /// Sort commits by topological order
@@ -21,8 +22,39 @@ struct Args {
     reference: String,
 }
 
+fn has_commit_graph() -> bool {
+    // Get the git objects directory
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-path", "objects/info"])
+        .output();
+
+    let objects_info = match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Err(_) => return false,
+    };
+
+    let objects_info_path = PathBuf::from(&objects_info);
+
+    // Check for single commit-graph file
+    if objects_info_path.join("commit-graph").exists() {
+        return true;
+    }
+
+    // Check for split commit-graph (commit-graphs/commit-graph-chain)
+    if objects_info_path.join("commit-graphs").join("commit-graph-chain").exists() {
+        return true;
+    }
+
+    false
+}
+
 fn main() {
     let args = Args::parse();
+
+    // Check for commit-graph and warn if not present
+    if !has_commit_graph() {
+        eprintln!("warning: no commit-graph found. For better performance, run: git commit-graph write");
+    }
 
     // Read input
     let reader: Box<dyn BufRead> = if args.input == "-" {
